@@ -1,0 +1,31 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+	"id": "org.eeckhaut.deskfit.treadmill",
+	"items": [
+		{
+			"key": "state",
+			"type": "text",
+			"rect": [12, 6, 176, 22],
+			"alignment": "left",
+			"font": { "size": 16, "weight": 600 },
+			"color": "#9ca3af"
+		},
+		{
+			"key": "speed",
+			"type": "text",
+			"rect": [12, 30, 176, 40],
+			"alignment": "left",
+			"font": { "size": 30, "weight": 700 }
+		},
+		{
+			"key": "bar",
+			"type": "bar",
+			"rect": [12, 78, 176, 12],
+			"subtype": 4,
+			"border_w": 0,
+			"bar_bg_c": "#374151",
+			"value": 0,
+			"range": { "min": 0, "max": 80 }
+		}
+	]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "deskfit-streamdeck",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build:helper": "cargo build --release --manifest-path ../Cargo.toml && mkdir -p org.eeckhaut.deskfit.sdPlugin/bin && cp ../target/release/deskfit org.eeckhaut.deskfit.sdPlugin/bin/deskfit && scripts/sign-helper.sh org.eeckhaut.deskfit.sdPlugin/bin/deskfit",
+    "build": "rollup -c",
+    "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart org.eeckhaut.deskfit\"",
+    "validate": "streamdeck validate org.eeckhaut.deskfit.sdPlugin"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "^3.0.3"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.10.3",
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^1.0.2",
+    "@rollup/plugin-typescript": "^12.3.1",
+    "@tsconfig/node20": "^20.1.10",
+    "@types/node": "^24.19.2",
+    "rollup": "^4.65.0",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
+  }
+}

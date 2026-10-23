@@ -1,0 +1,7 @@
+/target/
+node_modules/
+/dist/
+*.streamDeckPlugin
+**/*.sdPlugin/bin/
+**/*.sdPlugin/logs/
+.DS_Store

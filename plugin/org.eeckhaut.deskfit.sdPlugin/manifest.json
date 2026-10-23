@@ -1,0 +1,52 @@
+{
+	"Name": "Deskfit",
+	"Version": "0.1.0.0",
+	"Author": "Hendrik Eeckhaut",
+	"Actions": [
+		{
+			"Name": "Treadmill",
+			"UUID": "org.eeckhaut.deskfit.treadmill",
+			"Icon": "imgs/action",
+			"Tooltip": "Rotate to change speed; press to start or pause.",
+			"Controllers": [
+				"Encoder",
+				"Keypad"
+			],
+			"Encoder": {
+				"layout": "layouts/treadmill.json",
+				"TriggerDescription": {
+					"Rotate": "Change speed",
+					"Push": "Start / pause"
+				}
+			},
+			"States": [
+				{
+					"Image": "imgs/key",
+					"TitleAlignment": "middle",
+					"FontSize": 10
+				}
+			],
+			"PropertyInspectorPath": "ui/treadmill.html"
+		}
+	],
+	"Category": "Deskfit",
+	"CategoryIcon": "imgs/category",
+	"CodePath": "bin/plugin.js",
+	"Description": "Control a Sportstech DeskFit treadmill over Bluetooth.",
+	"Icon": "imgs/plugin",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "13"
+		}
+	],
+	"Nodejs": {
+		"Version": "24",
+		"Debug": "enabled"
+	},
+	"UUID": "org.eeckhaut.deskfit"
+}
