@@ -31,6 +31,8 @@ export type HelperState = {
 	/** Requested speed not yet confirmed by a status, in tenths of km/h. */
 	target: number | null;
 	max_speed: number;
+	/** Stopped and no longer polled, so that the treadmill can sleep. */
+	idle: boolean;
 };
 
 export type Request =
@@ -47,7 +49,7 @@ type Pending = { resolve: () => void; reject: (e: Error) => void; timer: NodeJS.
  * helper exits by itself when this process ends and its stdin closes.
  */
 export class Helper extends EventEmitter<{ state: [HelperState] }> {
-	state: HelperState = { connection: "connecting", error: null, status: null, target: null, max_speed: 80 };
+	state: HelperState = { connection: "connecting", error: null, status: null, target: null, max_speed: 80, idle: false };
 
 	private child?: ChildProcessWithoutNullStreams;
 	private nextId = 1;
@@ -77,7 +79,7 @@ export class Helper extends EventEmitter<{ state: [HelperState] }> {
 				p.reject(new Error("helper exited"));
 				this.pending.delete(id);
 			}
-			this.setState({ connection: "disconnected", error: "helper exited", status: null, target: null, max_speed: this.state.max_speed });
+			this.setState({ connection: "disconnected", error: "helper exited", status: null, target: null, max_speed: this.state.max_speed, idle: false });
 			setTimeout(() => this.start(), this.restartDelay);
 			this.restartDelay = Math.min(this.restartDelay * 2, MAX_RESTART_DELAY_MS);
 		});

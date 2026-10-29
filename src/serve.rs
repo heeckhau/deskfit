@@ -25,6 +25,9 @@ use crate::protocol::Command;
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Without a valid status for this long, the connection counts as lost.
 const LIVENESS: Duration = Duration::from_secs(3);
+/// While idle, how often to check that Bluetooth still reports a connection.
+/// This sends nothing to the treadmill.
+const LINK_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const FIND_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -185,14 +188,26 @@ impl Service {
     ) -> Result<()> {
         let mut poll = tokio::time::interval(POLL_INTERVAL);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut link_check = tokio::time::interval(LINK_CHECK_INTERVAL);
         let mut last_status = Instant::now();
         loop {
+            self.emit_state();
+            // While idle, nothing is sent so that the treadmill can sleep;
+            // only the local connection state is watched.
+            let idle = self.controller.idle(std::time::Instant::now());
             let speed_write_at = self.controller.next_speed_write_at().map(Instant::from_std);
             tokio::select! {
                 // Requests first, so a pause never waits behind polling.
                 biased;
                 request = requests.recv() => {
                     let Some(Envelope { id, request }) = request else { return Ok(()) };
+                    if idle && !matches!(request, Request::Configure { .. }) {
+                        if let Err(e) = self.wake(treadmill).await {
+                            reply(id, Err(format!("{e:#}")));
+                            return Err(e);
+                        }
+                        last_status = Instant::now();
+                    }
                     match self.controller.handle(request, std::time::Instant::now()) {
                         Err(e) => reply(id, Err(e)),
                         Ok(None) => reply(id, Ok(())),
@@ -211,10 +226,30 @@ impl Service {
                     self.controller.on_status(status?, std::time::Instant::now());
                     last_status = Instant::now();
                 }
-                _ = poll.tick() => treadmill.send(Command::FetchStatus).await?,
-                _ = sleep_until(last_status + LIVENESS) => bail!("no status for {LIVENESS:?}"),
+                _ = poll.tick(), if !idle => treadmill.send(Command::FetchStatus).await?,
+                _ = sleep_until(last_status + LIVENESS), if !idle => bail!("no status for {LIVENESS:?}"),
+                _ = link_check.tick(), if idle => {
+                    if !treadmill.is_connected().await? {
+                        bail!("disconnected while idle");
+                    }
+                }
             }
-            self.emit_state();
+        }
+    }
+
+    /// Fetch a status after idling, retrying while the treadmill wakes up.
+    async fn wake(&mut self, treadmill: &mut Treadmill) -> Result<()> {
+        let deadline = Instant::now() + LIVENESS;
+        loop {
+            treadmill.send(Command::FetchStatus).await?;
+            match tokio::time::timeout(POLL_INTERVAL, treadmill.next_valid_status()).await {
+                Ok(status) => {
+                    self.controller.on_status(status?, std::time::Instant::now());
+                    return Ok(());
+                }
+                Err(_) if Instant::now() < deadline => {}
+                Err(_) => bail!("no status for {LIVENESS:?} after idling"),
+            }
         }
     }
 

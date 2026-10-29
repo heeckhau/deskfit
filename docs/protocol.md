@@ -89,8 +89,19 @@ the target speed, not a measurement of the belt.
 - The step counter barely moves while walking (about 10 steps in 20
   minutes) and jumps during speed changes; it is not usable.
 
+- Sleep: about 10-15 s after the last status request, with no command and
+  the belt not moving, the treadmill sleeps. The connection stays open and
+  it keeps advertising, so it can be found and connected while asleep. Any
+  status request wakes it. Polling continuously therefore keeps it awake
+  forever; the Stream Deck helper stops polling once the belt has been
+  stopped for 10 s and wakes it when a dial or key is used.
+- LEDs, as seen on the treadmill: all flashing together while paused (also
+  when paused from the remote), a 1-9 sweep back and forth when stopped and
+  awake, and a slowly blinking 1 while asleep.
+
 Not yet tested: start from stopped and its countdown, stop, set speed while
-paused, and the auto-stop after a long pause.
+paused, the auto-stop after a long pause, and whether the treadmill notifies
+unprompted (for example when started from the remote while not polled).
 
 ## Reported by dft200-go, not verified here
 

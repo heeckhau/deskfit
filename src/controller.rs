@@ -16,6 +16,10 @@ pub const SPEED_WRITE_INTERVAL: Duration = Duration::from_millis(250);
 /// How long a written target is used as the base for further adjustments,
 /// covering the time until a status reflects it.
 const COMMANDED_HOLD: Duration = Duration::from_millis(1500);
+/// Stopped this long without a request, the service stops polling. Any
+/// status request wakes the treadmill, which otherwise sleeps 10-15 s after
+/// the last one.
+pub const IDLE_AFTER: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -39,6 +43,8 @@ pub struct Snapshot {
     /// Speed requested but not yet confirmed by a status.
     pub target: Option<u8>,
     pub max_speed: u8,
+    /// Stopped and no longer polled, so that the treadmill can sleep.
+    pub idle: bool,
 }
 
 pub struct Controller {
@@ -47,6 +53,8 @@ pub struct Controller {
     commanded: Option<(Speed, Instant)>,
     last_speed_write: Option<Instant>,
     max: Speed,
+    stopped_since: Option<Instant>,
+    last_request: Option<Instant>,
 }
 
 impl Default for Controller {
@@ -57,6 +65,8 @@ impl Default for Controller {
             commanded: None,
             last_speed_write: None,
             max: Speed::MAX,
+            stopped_since: None,
+            last_request: None,
         }
     }
 }
@@ -78,7 +88,19 @@ impl Controller {
         if self.commanded.is_some_and(|(s, _)| s.raw() == status.speed) {
             self.commanded = None;
         }
+        if status.state == State::Stopped {
+            self.stopped_since.get_or_insert(now);
+        } else {
+            self.stopped_since = None;
+        }
         self.status = Some((status, now));
+    }
+
+    /// Whether to stop polling: the belt has been stopped for a while and
+    /// nobody asked for anything since.
+    pub fn idle(&self, now: Instant) -> bool {
+        let long_ago = |t: Instant| now.duration_since(t) >= IDLE_AFTER;
+        self.stopped_since.is_some_and(long_ago) && self.last_request.is_none_or(long_ago)
     }
 
     /// Forget everything learned over the lost connection. Queued speed
@@ -88,10 +110,15 @@ impl Controller {
         self.pending = None;
         self.commanded = None;
         self.last_speed_write = None;
+        self.stopped_since = None;
+        self.last_request = None;
     }
 
     /// Handle a request. Returns a command to write immediately, if any.
     pub fn handle(&mut self, request: Request, now: Instant) -> Result<Option<Command>, String> {
+        if !matches!(request, Request::Configure { .. }) {
+            self.last_request = Some(now);
+        }
         match request {
             Request::Toggle => {
                 let state = self
@@ -182,6 +209,7 @@ impl Controller {
             status: self.fresh_status(now).cloned(),
             target: self.pending.or(commanded).map(Speed::raw),
             max_speed: self.max.raw(),
+            idle: self.idle(now),
         }
     }
 }
@@ -336,6 +364,42 @@ mod tests {
     }
 
     #[test]
+    fn idle_once_stopped_for_a_while() {
+        let t = Instant::now();
+        let mut c = Controller::default();
+        c.on_status(status(State::Stopped, 0), t);
+        // Later statuses do not restart the clock.
+        c.on_status(status(State::Stopped, 0), t + IDLE_AFTER / 2);
+        assert!(!c.idle(t + IDLE_AFTER / 2));
+        assert!(c.idle(t + IDLE_AFTER));
+        assert!(c.snapshot(t + IDLE_AFTER).idle);
+    }
+
+    #[test]
+    fn requests_and_movement_end_idle() {
+        let t = Instant::now();
+        let mut c = Controller::default();
+        c.on_status(status(State::Stopped, 0), t);
+        let later = t + IDLE_AFTER;
+        c.handle(Request::Configure { max_speed: 50 }, later).unwrap();
+        assert!(c.idle(later));
+        c.handle(Request::Start, later).unwrap();
+        assert!(!c.idle(later));
+        assert!(c.idle(later + IDLE_AFTER));
+        c.on_status(status(State::Starting, 0), later + IDLE_AFTER);
+        assert!(!c.idle(later + IDLE_AFTER * 2));
+    }
+
+    #[test]
+    fn never_idle_while_paused_or_running() {
+        let t = Instant::now();
+        let mut c = running_at(30, t);
+        assert!(!c.idle(t + IDLE_AFTER));
+        c.on_status(status(State::Paused, 0), t);
+        assert!(!c.idle(t + IDLE_AFTER));
+    }
+
+    #[test]
     fn disconnect_clears_queued_speed_and_state() {
         let t = Instant::now();
         let mut c = running_at(30, t);
@@ -344,5 +408,8 @@ mod tests {
         assert_eq!(c.take_speed_write(t), None);
         assert_eq!(c.snapshot(t).status, None);
         assert!(c.handle(Request::Toggle, t).is_err());
+        c.on_status(status(State::Stopped, 0), t);
+        c.on_disconnect();
+        assert!(!c.idle(t + IDLE_AFTER));
     }
 }

@@ -67,6 +67,13 @@ enum Command {
     /// Own the treadmill connection and take JSON-line requests on stdin.
     /// Used by the Stream Deck plugin.
     Serve,
+    /// Experiment: keep a connection open, polling every `--poll` seconds
+    /// (0: only once), and print each status change and connection loss.
+    #[command(hide = true)]
+    Hold {
+        #[arg(long, default_value_t = 0)]
+        poll: u64,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -126,6 +133,51 @@ async fn run(command: Command, out: Output) -> Result<()> {
         Command::Stop(o) => send(Packet::Stop, o, out).await,
         Command::Speed { value, observe } => send(Packet::SetSpeed(value), observe, out).await,
         Command::Serve => deskfit::serve::serve().await,
+        Command::Hold { poll } => {
+            let mut treadmill = connect().await?;
+            let result = tokio::select! {
+                r = hold(&mut treadmill, poll) => r,
+                _ = tokio::signal::ctrl_c() => Ok(()),
+            };
+            let _ = treadmill.disconnect().await;
+            result
+        }
+    }
+}
+
+/// Print status changes with the time since connecting until the
+/// connection drops.
+async fn hold(treadmill: &mut Treadmill, poll: u64) -> Result<()> {
+    let start = tokio::time::Instant::now();
+    let stamp = || {
+        let s = start.elapsed().as_secs();
+        format!("[{:02}:{:02}:{:02}]", s / 3600, s / 60 % 60, s % 60)
+    };
+    let mut poll_timer = tokio::time::interval(Duration::from_secs(poll.max(1)));
+    let mut link_check = tokio::time::interval(Duration::from_secs(5));
+    let mut last = String::new();
+    treadmill.send(Packet::FetchStatus).await?;
+    println!("{} connected, polling {}", stamp(), if poll == 0 { "once".into() } else { format!("every {poll} s") });
+    loop {
+        tokio::select! {
+            status = treadmill.next_valid_status() => {
+                let status = status?;
+                // Elapsed time and distance change while running; compare the rest.
+                let line = format!("{:?} speed {} raw {}", status.state, status.speed, treadmill.last_packet_hex());
+                let key = format!("{:?} {} {:?}", status.state, status.speed, status.countdown);
+                if key != last {
+                    println!("{} {line}", stamp());
+                    last = key;
+                }
+            }
+            _ = poll_timer.tick(), if poll > 0 => treadmill.send(Packet::FetchStatus).await?,
+            _ = link_check.tick() => {
+                if !treadmill.is_connected().await? {
+                    println!("{} disconnected by the treadmill", stamp());
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 

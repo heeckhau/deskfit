@@ -27,6 +27,8 @@ export function describe(state: HelperState, resumeSpeed: number | null): Displa
 		const label = state.connection === "connecting" ? "Connecting…" : "Disconnected";
 		return { label, speed: "--", bar: 0, color: GRAY };
 	}
+	// The belt was stopped; the helper no longer asks, so that it can sleep.
+	if (state.idle) return { label: "Standby", speed: "--", bar: 0, color: GRAY };
 	const status = state.status;
 	if (!status) return { label: "Unknown", speed: "--", bar: 0, color: GRAY };
 

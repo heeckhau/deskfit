@@ -154,6 +154,10 @@ impl Treadmill {
         self.next_status(timeout).await
     }
 
+    pub async fn is_connected(&self) -> Result<bool> {
+        self.peripheral.is_connected().await.map_err(Into::into)
+    }
+
     pub async fn disconnect(self) -> Result<()> {
         self.peripheral.disconnect().await.map_err(Into::into)
     }
