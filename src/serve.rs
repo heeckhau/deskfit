@@ -124,7 +124,7 @@ impl Service {
                 tokio::select! {
                     result = &mut connecting => break result,
                     request = requests.recv() => match request {
-                        Some(r) => self.handle_disconnected(r),
+                        Some(r) => { self.handle_disconnected(r); }
                         None => return Ok(()),
                     },
                 }
@@ -153,7 +153,9 @@ impl Service {
                 tokio::select! {
                     _ = sleep_until(retry_at) => break,
                     request = requests.recv() => match request {
-                        Some(r) => self.handle_disconnected(r),
+                        // Pressing a control is a sign the treadmill is
+                        // nearby and awake: retry now.
+                        Some(r) => if self.handle_disconnected(r) { break },
                         None => return Ok(()),
                     },
                 }
@@ -162,14 +164,17 @@ impl Service {
     }
 
     /// Settings apply at any time; anything that would move the motor is
-    /// refused rather than queued for after reconnecting.
-    fn handle_disconnected(&mut self, Envelope { id, request }: Envelope) {
+    /// refused rather than queued for after reconnecting. Returns whether
+    /// the request was such a refused control request.
+    fn handle_disconnected(&mut self, Envelope { id, request }: Envelope) -> bool {
         if let Request::Configure { .. } = request {
             let result = self.controller.handle(request, std::time::Instant::now()).map(|_| ());
             reply(id, result);
             self.emit_state();
+            false
         } else {
             reply(id, Err("not connected".into()));
+            true
         }
     }
 

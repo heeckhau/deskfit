@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use btleplug::api::{
     Central, CentralEvent, CentralState, Characteristic, Manager as _, Peripheral as _, PeripheralProperties,
-    ScanFilter, ValueNotification, WriteType,
+    RetrievePeripheralsOptions, ScanFilter, ValueNotification, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures::{Stream, StreamExt};
@@ -47,6 +47,17 @@ pub fn is_candidate(props: &PeripheralProperties) -> bool {
 
 /// Scan until the peripheral with this identifier shows up.
 pub async fn find(adapter: &Adapter, id: &str, timeout: Duration) -> Result<Peripheral> {
+    // A treadmill already connected to this Mac, for example by a connection
+    // request that completed after we gave up on it, does not advertise.
+    let connected = adapter
+        .retrieve_peripherals(RetrievePeripheralsOptions {
+            identifiers: None,
+            services: Some(vec![VENDOR_SERVICE]),
+        })
+        .await?;
+    if let Some(p) = connected.into_iter().find(|p| p.id().to_string().eq_ignore_ascii_case(id)) {
+        return Ok(p);
+    }
     let mut events = adapter.events().await?;
     adapter.start_scan(ScanFilter::default()).await?;
     let found = tokio::time::timeout(timeout, async {
@@ -82,6 +93,17 @@ pub struct Treadmill {
 
 impl Treadmill {
     pub async fn connect(peripheral: Peripheral) -> Result<Treadmill> {
+        let result = Self::open(&peripheral).await;
+        if result.is_err() {
+            // CoreBluetooth keeps a timed-out connection request pending and
+            // may complete it later, leaving the treadmill connected to this
+            // Mac but unused. Cancel it.
+            let _ = tokio::time::timeout(Duration::from_secs(2), peripheral.disconnect()).await;
+        }
+        result
+    }
+
+    async fn open(peripheral: &Peripheral) -> Result<Treadmill> {
         peripheral
             .connect_with_timeout(Duration::from_secs(10))
             .await
@@ -102,7 +124,7 @@ impl Treadmill {
         let notifications = peripheral.notifications().await?;
         peripheral.subscribe(&status).await.context("subscribing to status")?;
         Ok(Treadmill {
-            peripheral,
+            peripheral: peripheral.clone(),
             command,
             notifications,
             last_packet: Vec::new(),
